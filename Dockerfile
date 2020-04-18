@@ -86,7 +86,7 @@ RUN apt-get autoremove --purge -y build-essential libpcre3-dev libssl-dev wget z
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY /host /
 
 EXPOSE 1935
 
