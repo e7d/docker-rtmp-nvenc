@@ -1,14 +1,18 @@
-FROM nvidia/cuda:10.0-devel-ubuntu18.04 as ffmpeg-build
+ARG FFMPEG_LIB_DEPS="libfdk-aac-dev libomxil-bellagio-dev libv4l-dev libvorbis-dev libvpx-dev libwebp-dev libx264-dev libx265-dev libxvidcore-dev"
+
+FROM nvidia/cuda:10.2-devel-ubuntu18.04 as ffmpeg-build
+
+ARG FFMPEG_LIB_DEPS
 
 # https://www.nasm.us/pub/nasm/releasebuilds/
-ENV NASM_VERSION 2.14
+ENV NASM_VERSION 2.14.02
 # https://github.com/FFmpeg/nv-codec-headers/releases
 ENV NVCODEC_VERSION 9.1.23.1
 # https://ffmpeg.org/releases/
 ENV FFMPEG_VERSION 4.2.2
 
 RUN apt-get update \
-    && apt-get install -y autoconf curl git pkg-config
+    && apt-get install -y autoconf curl git $FFMPEG_LIB_DEPS
 
 RUN curl -fsSLO https://www.nasm.us/pub/nasm/releasebuilds/$NASM_VERSION/nasm-$NASM_VERSION.tar.bz2 \
     && tar -xjf nasm-$NASM_VERSION.tar.bz2 \
@@ -23,33 +27,51 @@ RUN git clone -b n$NVCODEC_VERSION --depth 1 https://git.videolan.org/git/ffmpeg
     && make install
 
 ENV PKG_CONFIG_PATH /usr/local/lib/pkgconfig
-RUN curl -fsSLO https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.bz2 \
+RUN apt-get install -y pkg-config \
+    && curl -fsSLO https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.bz2 \
     && tar -xjf ffmpeg-$FFMPEG_VERSION.tar.bz2 \
     && cd ffmpeg-$FFMPEG_VERSION \
-    && ./configure \
+    && ./configure --prefix=/usr \
+    --disable-debug \
     --enable-cuda \
     --enable-cuvid \
-    --enable-nvenc \
-    --enable-nonfree \
+    --enable-gpl \
+    --enable-libfdk-aac \
     --enable-libnpp \
+    --enable-libv4l2 \
+    --enable-libvorbis \
+    --enable-libvpx \
+    --enable-libwebp \
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libxvid \
+    --enable-nonfree \
+    --enable-nvdec \
+    --enable-nvenc \
+    --enable-omx \
+    --enable-version3 \
     --extra-cflags=-I/usr/local/cuda/include \
     --extra-ldflags=-L/usr/local/cuda/lib64 \
     && make -j$(nproc) \
     && make install
 
-FROM nvidia/cuda:10.0-runtime-ubuntu18.04
+FROM nvidia/cuda:10.2-runtime-ubuntu18.04 as ffmpeg-deps
 
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES compute,video,utility
+ARG FFMPEG_LIB_DEPS
 
-COPY --from=ffmpeg-build /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=ffmpeg-build /usr/local/bin/ffprobe /usr/local/bin/ffprobe
+RUN apt-get update \
+    && apt-get install -y $FFMPEG_LIB_DEPS \
+    && rm -rf /tmp/build
+
+FROM ffmpeg-deps as nginx-rtmp-build
+
+ARG BUILD_DEPS="build-essential libpcre3-dev libssl-dev wget zlib1g-dev"
 
 ENV NGINX_VERSION nginx-1.15.0
 ENV NGINX_RTMP_MODULE_VERSION 1.2.1
 
 RUN apt-get update \
-    && apt-get install -y build-essential ca-certificates libpcre3-dev libssl-dev openssl wget zlib1g-dev
+    && apt-get install -y ca-certificates openssl $BUILD_DEPS
 
 RUN mkdir -p /tmp/build/nginx \
     && cd /tmp/build/nginx \
@@ -78,15 +100,23 @@ RUN cd /tmp/build/nginx/${NGINX_VERSION} \
     && make -j$(nproc) \
     && make install \
     && mkdir /var/lock/nginx \
+    && apt-get autoremove --purge -y $BUILD_DEPS \
     && rm -rf /tmp/build
 
-RUN apt-get autoremove --purge -y build-essential libpcre3-dev libssl-dev wget zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+FROM ffmpeg-deps
+
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES compute,video,utility
+
+COPY --from=ffmpeg-build /usr/bin/ffmpeg /usr/bin/ffmpeg
+COPY --from=ffmpeg-build /usr/bin/ffprobe /usr/bin/ffprobe
+COPY --from=nginx-rtmp-build / /
+COPY /host /
 
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
-COPY /host /
+RUN ffmpeg -version
 
 EXPOSE 1935
 
