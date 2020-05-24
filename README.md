@@ -5,51 +5,42 @@ A docker gateway container between your PC and streaming services (Twitch, YouTu
 To use NVENC, you need a [compatible Nvidia card](https://developer.nvidia.com/video-encode-decode-gpu-support-matrix) and the [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-docker) for [Docker](https://docs.docker.com/get-started/) to be setup properly.
 
 ## How to run
-`docker run -d --runtime nvidia -p 1935:1935 --name rtmp-nvenc e7db/rtmp-nvenc`
+
+`docker run -d --runtime nvidia --name rtmp-nvenc -p 1935:1935 e7db/rtmp-nvenc`
 
 ## Test with OBS Studio and VLC
-Settings:
+
+In OBS, use the following settings:
 - **Stream type:** Custom Streaming Server
-- **URL:** rtmp://<ip_of_host>/live
-- **Stream key:** Anything. For example, `test`.
-Go to VLC and and test your stream with the URL `rtmp://<ip_of_host>/live/<key>`.
+- **URL:** rtmp://<ip_of_host>/local
+- **Stream key:** test
 
-## Go live on Twitch or YouTube
-Use the following URL:
-- **Twitch:** `rtmp://<ip_of_host>/twitch`
-- **YouTube:** `rtmp://<ip_of_host>/youtube`
+Start streaming, then, go to VLC and and test your stream with the URL `rtmp://<ip_of_host>/live/test`. 
 
-## Go live on another platform
-The current nginx.conf contains:
-```conf
-worker_processes auto;
-rtmp_auto_push on;
+Remember to replace <ip_of_host> with your server IP.
 
-events {
-}
+## Go live
 
-rtmp {
-    server {
-        listen 1935;
-        listen [::]:1935 ipv6only=on;
+Multiple default NVENC-based configurations are available for the following platforms:
+- Facebook Live, using `rtmp://<ip_of_host>/facebook`
+- Mixer, using `rtmp://<ip_of_host>/mixer`
+- Twitter Periscope, using `rtmp://<ip_of_host>/periscope`
+- Restream, using `rtmp://<ip_of_host>/restream`
+- Twitch, using `rtmp://<ip_of_host>/twitch`
+- YouTube, using `rtmp://<ip_of_host>/youtube`
 
-        application live {
-            live on;
-            record off;
-        }
+## Go live with custom settings
 
-        application twitch {
-            live on;
-            record off;
-            exec_push /usr/local/bin/ffmpeg -vsync 0 -hwaccel cuvid -c:v h264_cuvid -i rtmp://localhost/twitch/$name -c:a copy -c:v h264_nvenc -b 6000k -minrate 6000k -maxrate 6000k -bufsize 6000k -f flv rtmp://live.twitch.tv/app/$name >>/dev/stdout 2>&1;
-        }
+You can also use custom settings, to go Live on another platform or with any specific encoder settings you want. you can also use standard CPU-based x264 if you prefer.
 
-        application youtube {
-            live on;
-            record off;
-            exec_push /usr/local/bin/ffmpeg -vsync 0 -hwaccel cuvid -c:v h264_cuvid -i rtmp://localhost/youtube/$name -c:a copy -c:v h264_nvenc -b 6000k -minrate 6000k -maxrate 6000k -bufsize 6000k -f flv rtmp://a.rtmp.youtube.com/live2/$name >>/dev/stdout 2>&1;
-        }
-    }
+For example, you could go live on Twitch with 4MBps bitrate using the following configuration:
+```
+application twitch {
+    live on;
+    exec_push ffmpeg -hwaccel cuvid -c:v h264_cuvid -i rtmp://localhost/twitch/$name -vsync 0 -c:a copy -c:v h264_nvenc -preset hq -profile high -rc cbr -b 4M -bufsize 4M -f flv rtmp://live.twitch.tv/app/$name >>/dev/stdout 2>&1;
 }
 ```
-Based on that, you can extend this container to pretty much any streaming service compatible with RTMP.
+
+You can then use this specific configuration by starting the container like this:
+
+`docker run -d --runtime nvidia --name rtmp-nvenc -p 1935:1935 -v /path/to/custom.conf:/etc/nginx/rtmp-conf.d/custom.conf e7db/rtmp-nvenc`
